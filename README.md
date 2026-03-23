@@ -1,28 +1,25 @@
 # deep_log
 
-A dual-axis logging system for Rust — **level** (verbosity) + **zone** (bitflag per system).
-
-Two orthogonal axes mean you can be verbose on `MATRIX` and silent on `CHUNK` at the same time.
+A dual-axis logging system for Rust — **level** (verbosity) + **zone** (bitflag per system).  
+Two orthogonal axes, two independent outputs: **console** and **file**.
 
 ---
 
 ## Concept
 
-Most logging systems give you a single verbosity axis (`debug`, `info`, `warn`, `error`).  
-`deep_log` adds a second axis — **zones** — so you can target exactly which part of your code you want to hear from.
-
 ```
-A message is displayed if:
-  its_level >= log_level   (verbosity threshold)
+A message is displayed/written if:
+  its_level <= log_level   (verbosity threshold)
   AND
   its_zone ∈ active_zones  (system filter)
 ```
 
 | `log_level` | Effect |
 |-------------|--------|
-| `0`         | Everything is displayed |
-| `50`        | Only messages with level ≥ 50 |
-| `100`       | Only the most critical messages |
+| `0`         | Nothing is logged |
+| `10`        | Messages with level <= 10 (normal info) |
+| `50`        | Messages with level <= 50 (details) |
+| `100`       | Everything |
 
 ---
 
@@ -30,7 +27,7 @@ A message is displayed if:
 
 ```toml
 [dependencies]
-deep_log = "0.1.0"
+deep_log = "0.3.0"
 ```
 
 ---
@@ -41,42 +38,70 @@ deep_log = "0.1.0"
 use deep_log::{LogZone, dlog};
 
 fn main() {
-    // Show everything, all zones
-    deep_log::set(0, LogZone::ALL);
+    // Console : normal info, RENDER zone only
+    deep_log::set(10, LogZone::RENDER);
 
-    dlog!(LogZone::BASIC,  10,  "GPU : {}", "RTX 2080 Ti");
-    dlog!(LogZone::RENDER, 20,  "Surface : 1280x720");
-    dlog!(LogZone::MATRIX, 50,  "NDC vertex 0 : [{:.3}, {:.3}, {:.3}]", 0.029, 0.071, 0.980);
-    dlog!(LogZone::CHUNK,  100, "Face {} emitted", 42);
+    // File : everything from BASIC, written to logs/
+    deep_log::log_to_file(100, LogZone::BASIC, "logs/");
+    // → creates : logs/BASIC_2026-03-23_14-30-00.log
+
+    dlog!(LogZone::RENDER, 10, "Surface : 1280x720");   // console only
+    dlog!(LogZone::BASIC,  10, "GPU : RTX 2080 Ti");    // file only
+    dlog!(LogZone::BASIC, 100, "Verbose detail");        // file only
+    dlog!(LogZone::MATRIX, 10, "invisible");             // neither (zone not active)
 }
-```
-
-Output:
-```
-[BASIC|10]  GPU : RTX 2080 Ti
-[RENDER|20] Surface : 1280x720
-[MATRIX|50] NDC vertex 0 : [0.029, 0.071, 0.980]
-[CHUNK|100] Face 42 emitted
 ```
 
 ---
 
-## Filtering
+## Console output — `set()`
 
 ```rust
 use deep_log::LogZone;
 
-// Only MATRIX zone, level >= 50
-deep_log::set(50, LogZone::MATRIX);
+deep_log::set(10,  LogZone::BASIC | LogZone::RENDER); // normal info
+deep_log::set(100, LogZone::ALL);                     // everything
+deep_log::set(0,   LogZone::ALL);                     // nothing
+deep_log::set_all();   // equivalent to set(100, LogZone::ALL)
+deep_log::set_none();  // equivalent to set(0, LogZone::ALL)
+```
 
-// Multiple zones, level >= 10
-deep_log::set(10, LogZone::BASIC | LogZone::RENDER | LogZone::MATRIX);
+---
 
-// Everything
-deep_log::set_all();
+## File output — `log_to_file()`
 
-// Nothing
-deep_log::set_none();
+```rust
+use deep_log::LogZone;
+
+// One file per zone, in the given directory (absolute or relative)
+deep_log::log_to_file(100, LogZone::BASIC | LogZone::PHYSICS, "logs/");
+// → logs/BASIC_2026-03-23_14-30-00.log
+// → logs/PHYSICS_2026-03-23_14-30-00.log
+```
+
+**Behaviour:**
+- New file on every call (datetime in filename — no overwriting)
+- Flush on every line (safe for crash debugging)
+- One file per zone
+- Directory created automatically if it doesn't exist
+- Files closed automatically on program exit (drop)
+
+---
+
+## Console and file are independent
+
+```rust
+// Show only normal info on console
+deep_log::set(10, LogZone::RENDER);
+
+// Log everything to file, different zone
+deep_log::log_to_file(100, LogZone::PHYSICS, "logs/");
+
+// This goes to file only (PHYSICS not in console zones)
+dlog!(LogZone::PHYSICS, 70, "collision at y=14.3");
+
+// This goes to console only (RENDER not in file zones)
+dlog!(LogZone::RENDER, 10, "frame rendered");
 ```
 
 ---
@@ -100,20 +125,18 @@ deep_log::set_none();
 
 ## Custom zones
 
-Use bits 8→31 to define your own zones without colliding with predefined ones:
+Use bits 8→31 to avoid collisions with predefined zones:
 
 ```rust
 use deep_log::LogZone;
 
 const AI:       LogZone = LogZone::custom(1 << 8);
 const PATHFIND: LogZone = LogZone::custom(1 << 9);
-const INVENTORY:LogZone = LogZone::custom(1 << 10);
 
-deep_log::set(0, AI | PATHFIND);
+deep_log::set(100, AI | PATHFIND);
+deep_log::log_to_file(50, AI, "logs/");
 
-dlog!(AI,       20, "Agent {} thinking...", agent_id);
-dlog!(PATHFIND, 50, "Path found : {} nodes", path.len());
-dlog!(INVENTORY, 10, "invisible — zone not active");
+dlog!(AI, 10, "Agent {} thinking", agent_id);
 ```
 
 ---
@@ -122,7 +145,6 @@ dlog!(INVENTORY, 10, "invisible — zone not active");
 
 | Level | Usage                              |
 |-------|------------------------------------|
-| `1`   | Fatal errors                       |
 | `10`  | Normal info (startup, GPU name...) |
 | `20`  | Render stats                       |
 | `50`  | Matrices, NDC validation           |
@@ -133,36 +155,14 @@ dlog!(INVENTORY, 10, "invisible — zone not active");
 
 ## Thread safety
 
-`deep_log` uses `AtomicU8` and `AtomicU32` internally — configuration and logging are fully thread-safe with zero allocation.
+All configuration uses `AtomicU8` and `AtomicU32`. File writes are protected by a `Mutex`.  
+Zero allocation on the hot path (console only). File writes allocate a formatted string per message.
 
 ---
 
-## Runtime check
+## No external dependencies
 
-You can query the current configuration:
-
-```rust
-let current_level = deep_log::level();
-let current_zones = deep_log::zones();
-
-// Manual check (same condition as dlog!)
-if deep_log::should_log(LogZone::MATRIX, 50) {
-    // expensive computation only when needed
-    let ndc = compute_ndc();
-    dlog!(LogZone::MATRIX, 50, "NDC : {:?}", ndc);
-}
-```
-
----
-
-## Why not `log` / `tracing`?
-
-`log` and `tracing` are excellent general-purpose crates.  
-`deep_log` is purpose-built for **real-time systems** (games, simulations, renderers) where:
-
-- You need to silence an entire subsystem (e.g. mute `CHUNK` while debugging `MATRIX`) with a single call
-- You want zero-overhead filtering — two integer comparisons, no string parsing
-- You don't want to pull in a macro ecosystem just to print a matrix
+`current_datetime()` is implemented using only `std::time::SystemTime` — no `chrono`, no `time`.
 
 ---
 
