@@ -1,17 +1,17 @@
 [package]
 name        = "deep_log"
-version     = "0.2.0"
+version     = "0.3.0"
 edition     = "2021"
-description = "Dual-axis logging system : level (verbosity 0→100) + zone (bitflag per system)"
+description = "Dual-axis logging : level + zone bitflag, console and file output"
 license     = "MIT OR Apache-2.0"
 repository  = "https://github.com/your_username/deep_log"
 homepage    = "https://github.com/your_username/deep_log"
 documentation = "https://docs.rs/deep_log"
 readme      = "README.md"
-keywords    = ["logging", "debug", "gamedev", "bitflag"]
+keywords    = ["logging", "debug", "gamedev", "bitflag", "file"]
 categories  = ["development-tools::debugging"]
 authors     = ["your_name <your_email@example.com>"]
-rust-version = "1.60"
+rust-version = "1.70"
 exclude     = ["target/", ".git/"]
 
 [lib]
