@@ -1,0 +1,8 @@
+fn main() {
+    // set(niveau_max, zones) → affiche les logs niveau <= niveau_max dans les zones actives
+    // set(0,   zones) → aucun log
+    // set(10,  zones) → info normale (niveau <= 10)
+    // set(100, zones) → tout afficher
+    deep_log::set(10, LogZone::BASIC | LogZone::RENDER);
+
+    let event_loop = EventLoop::new().expect("event loop");

@@ -1,24 +1,21 @@
 # Changelog
 
-All notable changes to `deep_log` will be documented in this file.
+## [0.2.0] - 2026-03-23
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
----
+### Breaking Change
+- **Sémantique du niveau inversée** : un message s'affiche maintenant si `son_niveau <= log_level`
+  - `set(0,   zones)` → aucun log (avant : tout afficher)
+  - `set(10,  zones)` → logs de niveau <= 10 (info normale)
+  - `set(100, zones)` → tout afficher
+  - `set_all()` → équivalent à `set(100, LogZone::ALL)`
+  - `set_none()` → équivalent à `set(0, LogZone::ALL)`
+- Tous les tests mis à jour pour la nouvelle sémantique
 
 ## [0.1.0] - 2026-03-23
 
 ### Added
-- `LogZone` — bitflag type with 8 predefined zones : `BASIC`, `RENDER`, `MATRIX`, `SHADER`, `CHUNK`, `PHYSICS`, `AUDIO`, `NET`
-- `LogZone::custom(bit)` — define your own zones using bits 8→31
-- `LogZone::ALL` and `LogZone::NONE` constants
-- `dlog!(zone, level, ...)` macro — displays a message if `level >= log_level` AND `zone ∈ active_zones`
-- `deep_log::set(level, zones)` — configure level and active zones
-- `deep_log::set_all()` — enable everything
-- `deep_log::set_none()` — disable everything
-- `deep_log::level()` and `deep_log::zones()` — query current configuration
-- `deep_log::should_log(zone, level)` — manual check for expensive computations
-- Thread-safe implementation using `AtomicU8` and `AtomicU32`
-- Zero allocation — all filtering is done with integer comparisons
-- 7 unit tests + 6 doc-tests
+- Système de log dual-axe : niveau + zone bitflag
+- Macro `dlog!(zone, level, ...)`
+- 8 zones prédéfinies : BASIC, RENDER, MATRIX, SHADER, CHUNK, PHYSICS, AUDIO, NET
+- Zones custom avec `LogZone::custom(bit)`
+- Thread-safe, zéro allocation

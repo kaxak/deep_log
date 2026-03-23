@@ -1,0 +1,5 @@
+    // set(niveau_max, zones) → affiche les logs de niveau <= niveau_max dans les zones actives
+    // set(0,   zones) → aucun log
+    // set(10,  zones) → info normale seulement
+    // set(100, zones) → tout afficher
+    deep_log::set(10, LogZone::BASIC | LogZone::RENDER);
