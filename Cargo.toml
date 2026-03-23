@@ -1,0 +1,13 @@
+[package]
+name        = "deep_log"
+version     = "0.1.0"
+edition     = "2021"
+description = "Dual-axis logging system : level (verbosity 0→100) + zone (bitflag per system)"
+license     = "MIT OR Apache-2.0"
+repository  = "https://github.com/your_username/deep_log"
+keywords    = ["logging", "debug", "gamedev", "bitflag"]
+categories  = ["development-tools::debugging"]
+
+[[bin]]
+name = "deep_log_demo"
+path = "src/main.rs"
