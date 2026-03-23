@@ -4,10 +4,20 @@ version     = "0.1.0"
 edition     = "2021"
 description = "Dual-axis logging system : level (verbosity 0→100) + zone (bitflag per system)"
 license     = "MIT OR Apache-2.0"
-repository  = "https://github.com/your_username/deep_log"
+repository  = "https://github.com/kaxak/deep_log"
+homepage    = "https://github.com/kaxak/deep_log"
+documentation = "https://docs.rs/deep_log"
+readme      = "README.md"
 keywords    = ["logging", "debug", "gamedev", "bitflag"]
 categories  = ["development-tools::debugging"]
+authors     = ["kaxak git@kaxak.net"]
+rust-version = "1.60"
+exclude     = ["target/", ".git/"]
 
-[[bin]]
-name = "deep_log_demo"
-path = "src/main.rs"
+[lib]
+name = "deep_log"
+path = "src/lib.rs"
+
+[[example]]
+name = "demo"
+path = "examples/demo.rs"
