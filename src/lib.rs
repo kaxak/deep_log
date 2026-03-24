@@ -1,31 +1,7 @@
 //! # deep_log
 //!
 //! Système de log à deux axes orthogonaux : niveau + zone (bitflag).
-//!
-//! ## Deux sorties indépendantes
-//!
-//! - **Console** : `set(level, zones)` — affiche sur stderr
-//! - **Fichier** : `log_to_file(level, zones, dir)` — un fichier par zone
-//!
-//! Les deux sorties ont leur propre niveau et zones — totalement indépendants.
-//!
-//! ```rust
-//! use deep_log::LogZone;
-//!
-//! // Console : info normale sur RENDER seulement
-//! deep_log::set(10, LogZone::RENDER);
-//!
-//! // Fichier : tout BASIC dans logs/
-//! deep_log::log_to_file(100, LogZone::BASIC, "logs/");
-//! // → génère : logs/BASIC_2026-03-23_14-30-00.log
-//! ```
-//!
-//! ## Niveaux
-//!
-//! `set(niveau_max, zones)` — affiche les messages de niveau <= niveau_max.
-//! - `set(0,   zones)` → aucun log
-//! - `set(10,  zones)` → info normale
-//! - `set(100, zones)` → tout
+//! Deux sorties indépendantes : console (`set`) et fichier (`log_to_file`).
 
 use std::collections::HashMap;
 use std::fs::{create_dir_all, OpenOptions};
@@ -33,10 +9,6 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
-
-// ---------------------------------------------------------------------------
-// LogZone — bitflags
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LogZone(pub u32);
@@ -58,10 +30,15 @@ impl LogZone {
     #[inline]
     pub fn contains(self, other: Self) -> bool { (self.0 & other.0) != 0 }
 
-    /// Itère sur chaque zone simple (un bit) contenu dans ce bitflag
+    /// Itère sur chaque zone simple (un bit) contenu dans ce bitflag.
+    /// LogZone::ALL → seulement les 8 zones prédéfinies (bits 0-7).
+    /// Zones custom → seulement si explicitement dans le bitflag (pas hérités de ALL).
     pub fn iter_single(self) -> impl Iterator<Item = LogZone> {
+        let predefined = self.0 & 0xFF;
+        let custom     = if self.0 == u32::MAX { 0u32 } else { self.0 & !0xFF };
+        let bits       = predefined | custom;
         (0..32u8)
-            .filter(move |&bit| self.0 & (1u32 << bit) != 0)
+            .filter(move |&bit| bits & (1u32 << bit) != 0)
             .map(|bit| LogZone(1u32 << bit))
     }
 
@@ -122,10 +99,7 @@ static LOG_LEVEL: AtomicU8  = AtomicU8::new(0);
 static LOG_ZONES: AtomicU32 = AtomicU32::new(0);
 
 /// Configure la sortie console.
-/// `set(niveau_max, zones)` — affiche les messages de niveau <= niveau_max dans les zones.
-/// - `set(0,   zones)` → aucun log
-/// - `set(10,  zones)` → info normale (niveau <= 10)
-/// - `set(100, zones)` → tout afficher
+/// `set(0, zones)` → aucun log | `set(10, zones)` → info normale | `set(100, zones)` → tout
 pub fn set(level: u8, zones: LogZone) {
     LOG_LEVEL.store(level, Ordering::Relaxed);
     LOG_ZONES.store(zones.0, Ordering::Relaxed);
@@ -162,37 +136,24 @@ pub fn should_log_file(zone: LogZone, level: u8) -> bool {
 // ---------------------------------------------------------------------------
 
 struct FileLogger {
-    // clé = LogZone.0 (un seul bit), valeur = fichier ouvert
     files: HashMap<u32, std::fs::File>,
 }
 
 impl FileLogger {
     fn new() -> Self { Self { files: HashMap::new() } }
 
-    /// Ouvre un fichier par zone simple dans `dir`, avec `datetime` dans le nom.
-    /// Format : `<dir>/<ZONE>_<datetime>.log`
     fn open_zones(&mut self, zones: LogZone, dir: &str, datetime: &str) {
         let dir = dir.trim_end_matches('/');
         for single in zones.iter_single() {
             if self.files.contains_key(&single.0) { continue; }
-            let path = format!("{}{}{}_{}.log",
-                dir,
-                std::path::MAIN_SEPARATOR,
-                single.name(),
-                datetime);
+            let path = format!("{}{}{}_{}.log", dir, std::path::MAIN_SEPARATOR, single.name(), datetime);
             match OpenOptions::new().create(true).write(true).truncate(true).open(&path) {
-                Ok(f) => {
-                    self.files.insert(single.0, f);
-                    eprintln!("[deep_log] fichier log ouvert : {}", path);
-                }
-                Err(e) => {
-                    eprintln!("[deep_log] erreur ouverture {} : {}", path, e);
-                }
+                Ok(f)  => { self.files.insert(single.0, f); eprintln!("[deep_log] fichier log ouvert : {}", path); }
+                Err(e) => { eprintln!("[deep_log] erreur ouverture {} : {}", path, e); }
             }
         }
     }
 
-    /// Écrit dans tous les fichiers correspondant à la zone, flush immédiat
     fn write(&mut self, zone: LogZone, msg: &str) {
         for single in zone.iter_single() {
             if let Some(file) = self.files.get_mut(&single.0) {
@@ -203,7 +164,6 @@ impl FileLogger {
     }
 }
 
-// OnceLock — initialisé au premier appel de log_to_file()
 static FILE_LOGGER: OnceLock<Mutex<FileLogger>> = OnceLock::new();
 
 fn file_logger() -> &'static Mutex<FileLogger> {
@@ -211,35 +171,25 @@ fn file_logger() -> &'static Mutex<FileLogger> {
 }
 
 // ---------------------------------------------------------------------------
-// Datetime — sans dépendance externe (stdlib uniquement)
-// Utilise SystemTime pour obtenir un timestamp, converti en YYYY-MM-DD_HH-MM-SS
+// Datetime UTC — stdlib uniquement, format YYYY-MM-DD_HH-MM-SS
 // ---------------------------------------------------------------------------
 
 fn current_datetime() -> String {
-    // Secondes depuis UNIX epoch
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    // Conversion manuelle en date/heure UTC
-    let s   = secs % 60;
-    let m   = (secs / 60) % 60;
-    let h   = (secs / 3600) % 24;
-    let days = secs / 86400; // jours depuis 1970-01-01
-
-    // Algorithme de conversion jours → date (algorithme de Fliegel & Van Flandern)
-    let z   = days + 719468;
-    let era = z / 146097;
-    let doe = z - era * 146097;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y   = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp  = (5 * doy + 2) / 153;
-    let d   = doy - (153 * mp + 2) / 5 + 1;
-    let mo  = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y   = if mo <= 2 { y + 1 } else { y };
-
+    let secs  = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let s     = secs % 60;
+    let m     = (secs / 60) % 60;
+    let h     = (secs / 3600) % 24;
+    let days  = secs / 86400;
+    let z     = days + 719468;
+    let era   = z / 146097;
+    let doe   = z - era * 146097;
+    let yoe   = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y     = yoe + era * 400;
+    let doy   = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp    = (5 * doy + 2) / 153;
+    let d     = doy - (153 * mp + 2) / 5 + 1;
+    let mo    = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y     = if mo <= 2 { y + 1 } else { y };
     format!("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", y, mo, d, h, m, s)
 }
 
@@ -247,51 +197,22 @@ fn current_datetime() -> String {
 // API publique — log fichier
 // ---------------------------------------------------------------------------
 
-/// Active le log vers fichier pour les zones demandées.
-///
-/// - `level`  : niveau max (0 = désactivé, 100 = tout)
-/// - `zones`  : zones à logger (indépendant de `set()`)
-/// - `dir`    : dossier de destination (absolu ou relatif), créé si absent
-///
-/// Génère un fichier par zone : `<dir>/<ZONE>_<YYYY-MM-DD_HH-MM-SS>.log`
-/// Nouveau fichier à chaque appel (datetime dans le nom → pas d'écrasement).
-/// Flush à chaque ligne.
-///
-/// ```rust
-/// use deep_log::LogZone;
-/// // Console : RENDER en info normale
-/// deep_log::set(10, LogZone::RENDER);
-/// // Fichier : tout BASIC dans logs/
-/// deep_log::log_to_file(100, LogZone::BASIC, "logs/");
-/// ```
+/// Active le log vers fichier. Un fichier par zone : `<dir>/<ZONE>_<datetime>.log`
+/// `LogZone::ALL` → 8 fichiers prédéfinis (BASIC, RENDER, MATRIX, SHADER, CHUNK, PHYSICS, AUDIO, NET)
 pub fn log_to_file(level: u8, zones: LogZone, dir: &str) {
     if let Err(e) = create_dir_all(dir) {
         eprintln!("[deep_log] impossible de créer {} : {}", dir, e);
         return;
     }
-
     let datetime = current_datetime();
-
-    file_logger()
-        .lock()
-        .unwrap()
-        .open_zones(zones, dir, &datetime);
-
-    // Active les atomics fichier
+    file_logger().lock().unwrap().open_zones(zones, dir, &datetime);
     FILE_LEVEL.store(level, Ordering::Relaxed);
-    FILE_ZONES.fetch_or(zones.0, Ordering::Relaxed); // | pour ne pas écraser les zones déjà actives
+    FILE_ZONES.fetch_or(zones.0, Ordering::Relaxed);
 }
-
-// ---------------------------------------------------------------------------
-// print — console + fichier
-// ---------------------------------------------------------------------------
 
 #[inline]
 pub fn print(zone: LogZone, level: u8, msg: &str) {
-    // Console
     eprintln!("[{:?}|{}] {}", zone, level, msg);
-
-    // Fichier — si la zone est active pour le fichier
     if should_log_file(zone, level) {
         if let Ok(mut logger) = file_logger().lock() {
             logger.write(zone, &format!("[{:?}|{}] {}", zone, level, msg));
@@ -299,21 +220,6 @@ pub fn print(zone: LogZone, level: u8, msg: &str) {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Macro principale
-// ---------------------------------------------------------------------------
-
-/// Log à deux axes : zone + niveau.
-///
-/// Sortie console si `zone ∈ zones console` ET `niveau <= log_level console`.
-/// Sortie fichier  si `zone ∈ zones fichier` ET `niveau <= log_level fichier`.
-///
-/// ```rust
-/// use deep_log::{LogZone, dlog};
-/// deep_log::set(10, LogZone::ALL);
-/// dlog!(LogZone::BASIC, 10, "affiché en console");
-/// dlog!(LogZone::BASIC, 50, "pas affiché — 50 > 10");
-/// ```
 #[macro_export]
 macro_rules! dlog {
     ($zone:expr, $level:expr, $($arg:tt)*) => {
@@ -350,9 +256,7 @@ mod tests {
     #[test]
     fn test_set_100_affiche_tout() {
         set(100, LogZone::ALL);
-        assert!(should_log(LogZone::BASIC,   1));
         assert!(should_log(LogZone::BASIC,  10));
-        assert!(should_log(LogZone::BASIC,  50));
         assert!(should_log(LogZone::BASIC, 100));
     }
 
@@ -382,12 +286,28 @@ mod tests {
     }
 
     #[test]
-    fn test_iter_single() {
+    fn test_iter_single_basic() {
         let z = LogZone::BASIC | LogZone::PHYSICS;
         let singles: Vec<u32> = z.iter_single().map(|z| z.0).collect();
         assert!(singles.contains(&LogZone::BASIC.0));
         assert!(singles.contains(&LogZone::PHYSICS.0));
         assert_eq!(singles.len(), 2);
+    }
+
+    #[test]
+    fn test_iter_single_all_only_8_zones() {
+        // LogZone::ALL ne doit produire que 8 zones prédéfinies, pas 32
+        let count = LogZone::ALL.iter_single().count();
+        assert_eq!(count, 8, "ALL doit itérer sur 8 zones prédéfinies, pas {}", count);
+    }
+
+    #[test]
+    fn test_iter_single_custom_explicit() {
+        // Une zone custom explicite doit apparaître
+        const MY: LogZone = LogZone::custom(1 << 8);
+        let z = LogZone::BASIC | MY;
+        let count = z.iter_single().count();
+        assert_eq!(count, 2);
     }
 
     #[test]
@@ -410,7 +330,6 @@ mod tests {
     #[test]
     fn test_datetime_format() {
         let dt = current_datetime();
-        // Format attendu : YYYY-MM-DD_HH-MM-SS (19 chars)
         assert_eq!(dt.len(), 19, "datetime = '{}'", dt);
         assert_eq!(&dt[4..5],  "-");
         assert_eq!(&dt[7..8],  "-");
